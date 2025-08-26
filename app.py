@@ -2,18 +2,22 @@ import os
 import json
 from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)  # Allow frontend requests from any origin
 
 # --- Storage Setup ---
-# Try Render persistent disk first
-BASE_DIR = "/var/data" if os.path.exists("/var/data") and os.access("/var/data", os.W_OK) else "uploads"
+BASE_DIR = "uploads"  # Free plan: no persistent disk
 os.makedirs(BASE_DIR, exist_ok=True)
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 DATA_FILE = os.path.join(BASE_DIR, "apps.json")
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, "w") as f:
+        json.dump([], f)
 
 # --- Allowed file extensions ---
 ALLOWED_APP_EXTENSIONS = {"apk", "zip", "exe", "msi", "dmg", "pkg"}
@@ -21,9 +25,6 @@ ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
 # --- Helpers ---
 def load_apps():
-    if not os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "w") as f:
-            json.dump([], f)
     try:
         with open(DATA_FILE, "r") as f:
             return json.load(f)
@@ -44,12 +45,10 @@ def health_check():
 
 @app.route("/api/apps", methods=["GET"])
 def get_apps():
-    """Return all apps as JSON for frontend."""
     return jsonify(load_apps())
 
 @app.route("/upload", methods=["POST"])
 def upload_app():
-    """Admin upload endpoint."""
     name = request.form.get("name")
     description = request.form.get("description")
     app_file = request.files.get("file")
@@ -66,11 +65,9 @@ def upload_app():
     app_filename = secure_filename(app_file.filename)
     image_filename = secure_filename(image_file.filename)
 
-    # Save files
     app_file.save(os.path.join(UPLOAD_FOLDER, app_filename))
     image_file.save(os.path.join(UPLOAD_FOLDER, image_filename))
 
-    # Save to JSON
     apps = load_apps()
     apps.append({
         "name": name,
@@ -84,10 +81,9 @@ def upload_app():
 
 @app.route("/uploads/<path:filename>")
 def serve_upload(filename):
-    """Serve uploaded files."""
     return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=False)
 
 # --- Run ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5000))  # Render sets $PORT automatically
     app.run(host="0.0.0.0", port=port)
