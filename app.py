@@ -5,21 +5,19 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # Allow frontend requests from any origin
+CORS(app)  # Allow frontend/admin HTML to access API
 
 # --- Storage Setup ---
-BASE_DIR = "uploads"  # Free plan: no persistent disk
+BASE_DIR = "uploads"  # Free plan writable folder
 os.makedirs(BASE_DIR, exist_ok=True)
-
-UPLOAD_FOLDER = os.path.join(BASE_DIR)
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+UPLOAD_FOLDER = BASE_DIR
 
 DATA_FILE = os.path.join(BASE_DIR, "apps.json")
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w") as f:
         json.dump([], f)
 
-# --- Allowed file extensions ---
+# --- Allowed extensions ---
 ALLOWED_APP_EXTENSIONS = {"apk", "zip", "exe", "msi", "dmg", "pkg"}
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
@@ -85,5 +83,5 @@ def serve_upload(filename):
 
 # --- Run ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Render sets $PORT automatically
+    port = int(os.environ.get("PORT", 5000))  # Render free plan uses $PORT
     app.run(host="0.0.0.0", port=port)
