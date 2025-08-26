@@ -5,10 +5,16 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# --- Persistent storage on Render ---
-BASE_DIR = os.getenv("DB_DIR", "/var/data")
+# --- Determine writable storage ---
+if os.path.exists("/var/data") and os.access("/var/data", os.W_OK):
+    BASE_DIR = "/var/data"
+else:
+    BASE_DIR = "data"
+os.makedirs(BASE_DIR, exist_ok=True)
+
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 DATA_FILE = os.path.join(BASE_DIR, "apps.json")
 
 # --- Allowed file types ---
