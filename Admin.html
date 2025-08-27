@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel - Khali App Store</title>
+<style>
+body { font-family: Arial,sans-serif; background:#f9f9f9; margin:0; padding:0; }
+header { background:#4CAF50; color:white; padding:20px; text-align:center; }
+h1 { margin:0; font-size:2em; }
+form { max-width:500px; margin:30px auto; background:white; padding:20px; border-radius:10px; box-shadow:0 2px 5px rgba(0,0,0,0.2); }
+input[type=text], input[type=file], textarea { width:100%; padding:10px; margin:5px 0 15px; border-radius:5px; border:1px solid #ccc; box-sizing:border-box; }
+button { padding:12px 20px; background:#4CAF50; color:white; border:none; border-radius:5px; cursor:pointer; width:100%; }
+button:hover { background:#45A049; }
+#status { margin-top:10px; color:#333; font-weight:bold; text-align:center; }
+footer { text-align:center; padding:15px; background:#eee; margin-top:20px; }
+@media(max-width:600px){form{margin:20px;padding:15px;}h1{font-size:1.5em;}button{padding:10px;}}
+</style>
+</head>
+<body>
+
+<header><h1>Admin Panel</h1></header>
+
+<form id="uploadForm" enctype="multipart/form-data">
+<label for="name">App Name</label>
+<input type="text" name="name" required>
+
+<label for="description">Description</label>
+<textarea name="description" rows="3" required></textarea>
+
+<label for="file">App File (.apk, .zip, etc.)</label>
+<input type="file" name="file" accept=".apk,.zip,.exe,.msi,.dmg,.pkg" required>
+
+<label for="image">App Image (.jpg, .png, etc.)</label>
+<input type="file" name="image" accept=".jpg,.jpeg,.png,.gif,.webp" required>
+
+<button type="submit">Upload App</button>
+<p id="status"></p>
+</form>
+
+<footer>Khali App Store Admin</footer>
+
+<script>
+// Auto-detect backend
+const backendOrigin = window.location.origin; // works if served from backend
+// const backendOrigin = "https://store-backend-11-t56f.onrender.com"; // uncomment if hosted separately
+
+const UPLOAD_URL = backendOrigin + "/upload";
+const form = document.getElementById("uploadForm");
+const status = document.getElementById("status");
+
+form.addEventListener("submit", function(e){
+    e.preventDefault();
+    status.textContent = "Uploading...";
+
+    const formData = new FormData(form);
+
+    fetch(UPLOAD_URL, { method: "POST", body: formData })
+    .then(res => res.json())
+    .then(data => {
+        if(data.error){
+            status.textContent = "Error: " + data.error;
+        } else {
+            status.textContent = data.message || "Uploaded successfully!";
+            form.reset();
+        }
+    })
+    .catch(err => {
+        status.textContent = "Error uploading app";
+        console.error(err);
+    });
+});
+</script>
+
+</body>
+</html>
