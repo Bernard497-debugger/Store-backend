@@ -1,87 +1,101 @@
-import os
-import json
-from flask import Flask, request, jsonify, send_from_directory
-from werkzeug.utils import secure_filename
-from flask_cors import CORS
+from fastapi import FastAPI, UploadFile, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import declarative_base, sessionmaker
+import shutil, os
 
-app = Flask(__name__)
-CORS(app)  # Allow frontend/admin HTML to access API
+# --- Database setup ---
+Base = declarative_base()
+engine = create_engine("sqlite:///apps.db", connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine)
 
-# --- Storage Setup ---
-BASE_DIR = "uploads"  # Free plan writable folder
-os.makedirs(BASE_DIR, exist_ok=True)
-UPLOAD_FOLDER = BASE_DIR
+class AppModel(Base):
+    __tablename__ = "apps"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    desc = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
 
-DATA_FILE = os.path.join(BASE_DIR, "apps.json")
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "w") as f:
-        json.dump([], f)
+Base.metadata.create_all(bind=engine)
 
-# --- Allowed extensions ---
-ALLOWED_APP_EXTENSIONS = {"apk", "zip", "exe", "msi", "dmg", "pkg"}
-ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+# --- FastAPI setup ---
+app = FastAPI()
 
-# --- Helpers ---
-def load_apps():
-    try:
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    except json.JSONDecodeError:
-        return []
+# Allow frontend calls
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # for public usage (Netlify, Vercel, etc.)
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def save_apps(apps):
-    with open(DATA_FILE, "w") as f:
-        json.dump(apps, f, indent=2)
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-def allowed_file(filename, allowed_ext):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in allowed_ext
+# --- Schemas ---
+class AppOut(BaseModel):
+    id: int
+    name: str
+    desc: str
+    filename: str
+    class Config:
+        orm_mode = True
 
 # --- Routes ---
-@app.route("/", methods=["GET"])
-def health_check():
-    return jsonify({"status": "Backend is live"})
 
-@app.route("/api/apps", methods=["GET"])
-def get_apps():
-    return jsonify(load_apps())
+@app.get("/apps", response_model=list[AppOut])
+def list_apps():
+    db = SessionLocal()
+    apps = db.query(AppModel).all()
+    db.close()
+    return apps
 
-@app.route("/upload", methods=["POST"])
-def upload_app():
-    name = request.form.get("name")
-    description = request.form.get("description")
-    app_file = request.files.get("file")
-    image_file = request.files.get("image")
+@app.post("/apps", response_model=AppOut)
+def upload_app(
+    name: str = Form(...),
+    desc: str = Form(...),
+    file: UploadFile = None
+):
+    if not file:
+        raise HTTPException(status_code=400, detail="File required")
 
-    if not all([name, description, app_file, image_file]):
-        return jsonify({"error": "Missing required fields"}), 400
+    db = SessionLocal()
+    filepath = os.path.join(UPLOAD_DIR, file.filename)
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    if not allowed_file(app_file.filename, ALLOWED_APP_EXTENSIONS):
-        return jsonify({"error": "Invalid app file type"}), 400
-    if not allowed_file(image_file.filename, ALLOWED_IMAGE_EXTENSIONS):
-        return jsonify({"error": "Invalid image file type"}), 400
+    app_entry = AppModel(name=name, desc=desc, filename=file.filename)
+    db.add(app_entry)
+    db.commit()
+    db.refresh(app_entry)
+    db.close()
+    return app_entry
 
-    app_filename = secure_filename(app_file.filename)
-    image_filename = secure_filename(image_file.filename)
+@app.get("/download/{app_id}")
+def download_app(app_id: int):
+    db = SessionLocal()
+    app_entry = db.query(AppModel).filter(AppModel.id == app_id).first()
+    db.close()
+    if not app_entry:
+        raise HTTPException(status_code=404, detail="App not found")
+    filepath = os.path.join(UPLOAD_DIR, app_entry.filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="File not found on server")
+    return FileResponse(filepath, filename=app_entry.filename)
 
-    app_file.save(os.path.join(UPLOAD_FOLDER, app_filename))
-    image_file.save(os.path.join(UPLOAD_FOLDER, image_filename))
-
-    apps = load_apps()
-    apps.append({
-        "name": name,
-        "description": description,
-        "file": f"/uploads/{app_filename}",
-        "image": f"/uploads/{image_filename}"
-    })
-    save_apps(apps)
-
-    return jsonify({"message": "App uploaded successfully!"}), 201
-
-@app.route("/uploads/<path:filename>")
-def serve_upload(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=False)
-
-# --- Run ---
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Render free plan uses $PORT
-    app.run(host="0.0.0.0", port=port)
+@app.delete("/apps/{app_id}")
+def delete_app(app_id: int):
+    db = SessionLocal()
+    app_entry = db.query(AppModel).filter(AppModel.id == app_id).first()
+    if not app_entry:
+        db.close()
+        raise HTTPException(status_code=404, detail="App not found")
+    filepath = os.path.join(UPLOAD_DIR, app_entry.filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    db.delete(app_entry)
+    db.commit()
+    db.close()
+    return {"detail": "App deleted"}
