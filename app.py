@@ -5,18 +5,19 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # allow all origins
+CORS(app)
 
-# --- Storage Setup ---
-BASE_DIR = "uploads"
-os.makedirs(BASE_DIR, exist_ok=True)
-UPLOAD_FOLDER = BASE_DIR
-DATA_FILE = os.path.join(BASE_DIR, "apps.json")
+# --- Config ---
+BASE_DIR = os.getcwd()
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+
+DATA_FILE = os.path.join(UPLOAD_FOLDER, "apps.json")
 if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "w") as f:
+    with open(DATA_FILE,"w") as f:
         json.dump([], f)
 
-# --- Allowed extensions ---
 ALLOWED_APP_EXTENSIONS = {"apk","zip","exe","msi","dmg","pkg"}
 ALLOWED_IMAGE_EXTENSIONS = {"png","jpg","jpeg","gif","webp"}
 
@@ -42,7 +43,6 @@ def health_check():
 
 @app.route("/admin")
 def admin_panel():
-    # Serve admin panel from backend
     return send_from_directory('.', 'admin.html')
 
 @app.route("/api/apps", methods=["GET"])
@@ -51,34 +51,36 @@ def get_apps():
 
 @app.route("/upload", methods=["POST"])
 def upload_app():
-    name = request.form.get("name")
-    description = request.form.get("description")
-    app_file = request.files.get("file")
-    image_file = request.files.get("image")
+    try:
+        name = request.form.get("name")
+        description = request.form.get("description")
+        app_file = request.files.get("file")
+        image_file = request.files.get("image")
+        if not all([name, description, app_file, image_file]):
+            return jsonify({"error":"Missing required fields"}),400
 
-    if not all([name, description, app_file, image_file]):
-        return jsonify({"error":"Missing required fields"}),400
+        if not allowed_file(app_file.filename, ALLOWED_APP_EXTENSIONS):
+            return jsonify({"error":"Invalid app file type"}),400
+        if not allowed_file(image_file.filename, ALLOWED_IMAGE_EXTENSIONS):
+            return jsonify({"error":"Invalid image file type"}),400
 
-    if not allowed_file(app_file.filename, ALLOWED_APP_EXTENSIONS):
-        return jsonify({"error":"Invalid app file type"}),400
-    if not allowed_file(image_file.filename, ALLOWED_IMAGE_EXTENSIONS):
-        return jsonify({"error":"Invalid image file type"}),400
+        app_filename = secure_filename(app_file.filename)
+        image_filename = secure_filename(image_file.filename)
+        app_file.save(os.path.join(UPLOAD_FOLDER, app_filename))
+        image_file.save(os.path.join(UPLOAD_FOLDER, image_filename))
 
-    app_filename = secure_filename(app_file.filename)
-    image_filename = secure_filename(image_file.filename)
-    app_file.save(os.path.join(UPLOAD_FOLDER, app_filename))
-    image_file.save(os.path.join(UPLOAD_FOLDER, image_filename))
-
-    apps = load_apps()
-    apps.append({
-        "name": name,
-        "description": description,
-        "file": f"/uploads/{app_filename}",
-        "image": f"/uploads/{image_filename}"
-    })
-    save_apps(apps)
-
-    return jsonify({"message":"App uploaded successfully!"}),201
+        apps = load_apps()
+        apps.append({
+            "name": name,
+            "description": description,
+            "file": f"/uploads/{app_filename}",
+            "image": f"/uploads/{image_filename}"
+        })
+        save_apps(apps)
+        return jsonify({"message":"App uploaded successfully!"}),201
+    except Exception as e:
+        print("UPLOAD ERROR:", e)
+        return jsonify({"error":"Server error during upload"}),500
 
 @app.route("/uploads/<path:filename>")
 def serve_upload(filename):
